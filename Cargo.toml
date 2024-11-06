@@ -1,0 +1,11 @@
+[package]
+name = "salish"
+version = "0.1.0-dev.0"
+edition = "2021"
+description = "Messaging Library"
+homepage = "https://github.com/boondocklabs/salish"
+repository = "https://github.com/boondocklabs/salish"
+documentation = "https://docs.rs/salish"
+readme = "README.md"
+
+[dependencies]
