@@ -2,6 +2,7 @@
 name = "salish"
 version = "0.1.0-dev.0"
 edition = "2021"
+license = "MIT"
 description = "Messaging Library"
 homepage = "https://github.com/boondocklabs/salish"
 repository = "https://github.com/boondocklabs/salish"
@@ -9,3 +10,8 @@ documentation = "https://docs.rs/salish"
 readme = "README.md"
 
 [dependencies]
+tracing = "0.1.40"
+tracing-test = "0.2.5"
+
+[dev-dependencies]
+tracing-test = "0.2.5"
