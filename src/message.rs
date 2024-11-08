@@ -2,16 +2,20 @@ use std::{
     any::{type_name, Any, TypeId},
     hash::{DefaultHasher, Hasher as _},
     marker::PhantomData,
-    rc::Rc,
     sync::Arc,
 };
 
-use crate::traits::{internal::SalishMessageInternal as _, Endpoint, Payload, SalishMessage};
+use crate::traits::{
+    internal::SalishMessageInternal as _, EndpointAddress, Payload, SalishMessage,
+};
 
 #[derive(Clone)]
-pub struct Message {
-    dest: Destination<<<Self as SalishMessage>::Endpoint as Endpoint>::Addr>,
-    data: Arc<Box<dyn Any>>,
+pub struct Message
+where
+    Self: Send + Sync,
+{
+    dest: Destination<<<Self as SalishMessage>::Endpoint as EndpointAddress>::Addr>,
+    data: Arc<Box<dyn Any + Send + Sync>>,
     type_name: &'static str,
 }
 
@@ -34,7 +38,7 @@ impl Message {
 
     /// Create a new message with destination specified by `dest`
     pub fn new_to<T: Payload + 'static>(
-        dest: Destination<<<Self as SalishMessage>::Endpoint as Endpoint>::Addr>,
+        dest: Destination<<<Self as SalishMessage>::Endpoint as EndpointAddress>::Addr>,
         data: T,
     ) -> Self {
         Self {
@@ -48,12 +52,23 @@ impl Message {
     pub fn is_type<T: 'static>(&self) -> bool {
         TypeId::of::<T>() == self.payload_type()
     }
+
+    /// Get the destination of this message
+    pub fn dest(
+        &self,
+    ) -> &Destination<<<Self as SalishMessage>::Endpoint as EndpointAddress>::Addr> {
+        &self.dest
+    }
 }
 
 #[derive(Clone, Debug)]
 pub enum Destination<Addr> {
+    /// Message destined to any endpoint listening to a message type
     Any,
-    Endpoint(Rc<Box<dyn Endpoint<Addr = Addr>>>),
+
+    /// Message destined to a specific endpoint
+    //Endpoint(Arc<dyn EndpointAddress<Addr = Addr>>),
+    Endpoint(Addr),
 }
 
 impl<Addr: 'static> Destination<Addr> {
@@ -61,23 +76,23 @@ impl<Addr: 'static> Destination<Addr> {
         Self::Any
     }
 
-    pub fn endpoint(endpoint: impl Endpoint<Addr = Addr> + 'static) -> Self {
-        Self::Endpoint(Rc::new(Box::new(endpoint)))
+    pub fn endpoint(addr: Addr) -> Self {
+        Self::Endpoint(addr)
     }
 }
 
 #[derive(Debug, Clone)]
 struct HashEndpoint<'a, T>
 where
-    T: std::fmt::Debug + std::hash::Hash,
+    T: std::fmt::Debug + std::hash::Hash + Send + Sync,
 {
     h: &'a T,
     _phantom: PhantomData<T>,
 }
 
-impl<'a, T: std::hash::Hash> Endpoint for HashEndpoint<'a, T>
+impl<'a, T: std::hash::Hash> EndpointAddress for HashEndpoint<'a, T>
 where
-    T: std::fmt::Debug + std::hash::Hash,
+    T: std::fmt::Debug + std::hash::Hash + Send + Sync,
 {
     type Addr = u64;
     fn addr(&self) -> Self::Addr {
@@ -87,7 +102,7 @@ where
     }
 }
 
-impl Endpoint for u64 {
+impl EndpointAddress for u64 {
     type Addr = u64;
 
     fn addr(&self) -> Self::Addr {

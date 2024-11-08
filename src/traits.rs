@@ -34,7 +34,7 @@ pub(crate) mod internal {
 /// Salish message trait, implemented by message containers for routing and unwrapping inner message types
 pub trait SalishMessage {
     /// The [`Endpoint`] type that messages can be routed to
-    type Endpoint: Endpoint;
+    type Endpoint: EndpointAddress;
 
     /// Implementations of [`SalishMessage`] must provide a method that returns a `&dyn Any`
     fn as_any(&self) -> &dyn Any;
@@ -44,10 +44,10 @@ pub trait SalishMessage {
 impl<T> internal::SalishMessageInternal for T where T: SalishMessage {}
 
 /// Message Payload
-pub trait Payload: Any + std::fmt::Debug + 'static {}
+pub trait Payload: Any + Send + Sync + std::fmt::Debug + 'static {}
 
 /// Message Endpoint
-pub trait Endpoint: std::fmt::Debug {
+pub trait EndpointAddress: std::fmt::Debug + Send + Sync {
     type Addr;
     fn addr(&self) -> Self::Addr;
 }

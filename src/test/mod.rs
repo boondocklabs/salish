@@ -1,5 +1,6 @@
 use crate::traits::Payload;
 
+mod endpoint;
 mod handler;
 mod message;
 mod router;
