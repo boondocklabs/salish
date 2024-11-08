@@ -10,8 +10,7 @@ documentation = "https://docs.rs/salish"
 readme = "README.md"
 
 [dependencies]
-#anylock = "0.1.0"
-anylock = { path = "../anylock" }
+anylock = "0.1.0"
 colored = "2.1.0"
 rayon = "1.10.0"
 tracing = "0.1.40"
