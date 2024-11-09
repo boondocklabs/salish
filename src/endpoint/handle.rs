@@ -15,7 +15,11 @@ use super::{Endpoint, EndpointId, EndpointInner};
 
 /// Endpoint callback to the inner dispatch closure which downcasts to concrete message type
 /// and forwards to [`Endpoint::on_message()`]
-pub type EndpointCallback<'a, Ret> =
+pub type EndpointCallbackOwned<'a, Ret> =
+    Box<dyn Fn(crate::message::Message) -> Option<Ret> + Send + Sync + 'a>;
+
+#[allow(unused)]
+pub type EndpointCallbackRef<'a, Ret> =
     Box<dyn for<'b> Fn(&'b crate::message::Message) -> Option<Ret> + Send + Sync + 'a>;
 
 /// Type erased endpoint handle. Contains a callback to the message handler
@@ -24,7 +28,7 @@ where
     Self: Send + Sync,
 {
     pub endpoint_id: EndpointId,
-    pub callback: EndpointCallback<'a, Ret>,
+    pub callback: EndpointCallbackOwned<'a, Ret>,
 }
 
 impl<'a, Ret> std::fmt::Debug for EndpointHandle<'a, Ret>
@@ -56,9 +60,9 @@ where
         // Get a clone of the [`EndpointInner`] handler, which can be held longer than the [`Endpoint`] itself
         let inner = endpoint.inner.clone();
 
-        let dispatch = move |msg: &Message| {
+        let dispatch = move |message: Message| {
             // Get the downcast inner concrete message of type [`MessageHandler::Message`]
-            if let Some(payload) = msg.inner::<M>() {
+            if let Some(payload) = message.into_inner::<M>() {
                 Some(inner.write().on_message(payload))
             } else {
                 error!("Failed to downcast message");

@@ -1,3 +1,5 @@
+//! Message Endpoint
+
 use std::{
     any::TypeId,
     marker::PhantomData,
@@ -21,7 +23,9 @@ static ENDPOINT_ID: LazyLock<Arc<AtomicU64>> = LazyLock::new(|| Arc::new(AtomicU
 
 pub type EndpointId = u64;
 
-/// Message Endpoint for receiving messages. This is split into an outer Endpoint, and [`EndpointInner`] which implements [`MessageHandler`]
+/// Message Endpoint
+///
+/// This is split into an outer Endpoint, and [`EndpointInner`] which implements [`MessageHandler`]
 /// This allows the outer [`Endpoint`] to control deregistration on drop, as there are no clones of the outer [`Endpoint`].
 /// The owner of the endpoint can drop the endpoint, which will deregister the endpoint from [`MessageRouter`].
 pub struct Endpoint<
@@ -48,7 +52,7 @@ pub struct Endpoint<
     Lock: AnyLock<EndpointInner<'a, M, R>> + 'a,
 {
     id: EndpointId,
-    router: MessageRouter<'a, R>,
+    router: Option<MessageRouter<'a, R>>,
     inner: Ref,
     _phantom: (PhantomData<M>, PhantomData<Lock>),
 }
@@ -88,7 +92,9 @@ where
     Lock: AnyLock<EndpointInner<'a, M, R>>,
 {
     fn drop(&mut self) {
-        self.router.remove_endpoint(self.id);
+        if let Some(router) = &self.router {
+            router.remove_endpoint(self.id);
+        }
     }
 }
 
@@ -99,7 +105,7 @@ where
     Ref: Deref<Target: AnyLock<EndpointInner<'a, M, R>>> + From<Lock> + Clone + Send + Sync + 'a,
     Lock: AnyLock<EndpointInner<'a, M, R>> + Send + Sync + 'a,
 {
-    pub fn new(router: MessageRouter<'a, R>) -> Self
+    pub fn new(router: Option<MessageRouter<'a, R>>) -> Self
     where
         R: 'a,
     {
@@ -111,7 +117,9 @@ where
         };
 
         // Register this endpoint with the router
-        endpoint.router().add_endpoint(&endpoint);
+        if let Some(router) = endpoint.router() {
+            router.add_endpoint(&endpoint);
+        }
 
         debug!("Created {endpoint:?}");
 
@@ -124,8 +132,8 @@ where
     }
 
     /// Get a reference to the [`MessageRouter`] which was cloned into this endpoint
-    pub fn router(&self) -> &MessageRouter<'a, R> {
-        &self.router
+    pub fn router(&self) -> Option<&MessageRouter<'a, R>> {
+        self.router.as_ref()
     }
 
     // Get the [`TypeId`] of the messages this endpoint can receive
@@ -136,7 +144,7 @@ where
     // Register a message callback with [`EndpointInner`]
     pub fn message<F>(self, f: F) -> Self
     where
-        F: FnMut(&M) -> R + Send + Sync + 'a,
+        F: FnMut(M) -> R + Send + Sync + 'a,
     {
         self.inner.write().callback = Some(Box::new(f));
         self
@@ -144,14 +152,14 @@ where
 }
 
 /// Inner Endpoint. Clones of this can be held alive and not prevent [`Endpoint`] [`Drop`] impl from deregistering
-/// the endpoint from the router.
+/// the endpoint from the [`MessageRouter`].
 pub struct EndpointInner<'a, M, R>
 where
     Self: MessageHandler,
 {
     callback: Option<
         Box<
-            dyn FnMut(&<Self as MessageHandler>::Message) -> <Self as MessageHandler>::Return
+            dyn FnMut(<Self as MessageHandler>::Message) -> <Self as MessageHandler>::Return
                 + Send
                 + Sync
                 + 'a,
@@ -202,7 +210,7 @@ where
     type Message = M;
     type Return = R;
 
-    fn on_message<'b>(&'b mut self, message: &'b Self::Message) -> Self::Return {
+    fn on_message<'b>(&'b mut self, message: Self::Message) -> Self::Return {
         if let Some(callback) = &mut self.callback {
             (callback)(message)
         } else {

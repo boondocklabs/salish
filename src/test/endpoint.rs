@@ -26,7 +26,7 @@ fn endpoint() {
         }
     });
 
-    let results = router.handle_message(&mut Message::new(TestPayload::Integer(1)));
+    let results = router.handle_message(Message::new(TestPayload::Integer(1)));
 
     println!("After message handled {results:?}");
 }
@@ -42,7 +42,7 @@ fn endpoint_deregister() {
             .take(100)
             .collect();
 
-    let _ = router.handle_message(&mut Message::new(TestPayload::Integer(1)));
+    let _ = router.handle_message(Message::new(TestPayload::Integer(1)));
 
     // We should have 100 handlers
     assert_eq!(router.num_handlers(), 100);
@@ -70,12 +70,12 @@ fn endpoint_address() {
     });
     endpoint.addr();
 
-    let mut message = Message::new_to(
+    let message = Message::new_to(
         Destination::endpoint(endpoint.addr()),
         TestPayload::Integer(1234),
     );
 
-    router.handle_message(&mut message);
+    router.handle_message(message);
 
     let received = rx.lock().unwrap();
     assert!(received.is_some());

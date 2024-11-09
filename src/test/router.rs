@@ -6,6 +6,6 @@ use crate::{message::Message, router::MessageRouter, test::TestPayload};
 #[test]
 fn create() {
     let mut router = MessageRouter::<&'static str>::new();
-    let mut msg = Message::new(TestPayload::Integer(1234));
-    let _ = router.handle_message(&mut msg);
+    let msg = Message::new(TestPayload::Integer(1234));
+    let _ = router.handle_message(msg);
 }

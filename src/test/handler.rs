@@ -9,7 +9,7 @@ impl MessageHandler for TestHandler {
     type Message = TestPayload;
     type Return = bool;
 
-    fn on_message(&mut self, message: &Self::Message) -> Self::Return {
+    fn on_message(&mut self, message: Self::Message) -> Self::Return {
         println!("HANDLER MESSAGE {message:#?}");
         true
     }

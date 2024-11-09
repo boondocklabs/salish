@@ -8,7 +8,12 @@ use std::{
 };
 
 use colored::Colorize as _;
-use salish::{endpoint::Endpoint, message::Message, router::MessageRouter, traits::Payload};
+use salish::{
+    endpoint::Endpoint,
+    message::{Destination, Message},
+    policy::Policy,
+    router::MessageRouter,
+};
 
 /// Example App struct representing some application state
 #[derive(Debug)]
@@ -37,20 +42,18 @@ impl<'a> App<'a> {
 
 /// A message payload for temperature
 #[allow(unused)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct TempMessage {
     sensor_id: u64,
     temp: f32,
 }
-impl Payload for TempMessage {}
 
 #[allow(unused)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct HumidityMessage {
     sensor_id: u64,
     humidity: f32,
 }
-impl Payload for HumidityMessage {}
 
 #[allow(unused)]
 #[derive(Debug)]
@@ -67,9 +70,9 @@ fn main() {
             .create_endpoint::<TempMessage>()
             .message(move |_msg| {
                 let _tid = std::thread::current().id();
-                //println!("{:?}", tid);
-                _count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                //println!("Received message in callback {msg:?} handler {_i}");
+                //println!("{:?}", _tid);
+                //_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                //println!("Received message in callback {_msg:?} handler {_i}");
                 //Task(format!("Returning a task from the closure {i}"))
                 //Task(format!("Return task {} {}", msg.sensor_id, msg.temp))
                 Task("received")
@@ -97,17 +100,22 @@ fn main() {
     let mut last_time = start_time;
     let mut last_count = 0;
 
+    let mut count = 0u64;
+
     // Send some messages
     loop {
-        let _tasks = app.router.handle_message(&mut Message::new_to(
-            salish::message::Destination::Any,
+        let tasks = app.router.handle_message(Message::new_to(
+            Destination::Broadcast(Policy::default()),
             TempMessage {
                 sensor_id: 2,
                 temp: 21.22,
             },
         ));
 
-        let count = app.count.load(std::sync::atomic::Ordering::Relaxed);
+        if let Some(tasks) = tasks {
+            //assert_eq!(tasks.len(), 100000);
+            count += tasks.len() as u64;
+        }
 
         if count % 10000000u64 == 0 && count > 0 {
             // Calculate messages per second
@@ -116,7 +124,7 @@ fn main() {
 
             println!(
                 "Messages Processed: {} {}{}",
-                app.count.load(std::sync::atomic::Ordering::Relaxed),
+                count,
                 format!("{}", messages_per_second as usize).cyan(),
                 "/sec".cyan()
             );

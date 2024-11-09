@@ -1,50 +1,80 @@
+//! Message container for wrapping any [`Payload`]
+
 use std::{
-    any::{type_name, Any, TypeId},
+    any::{type_name, TypeId},
     hash::{DefaultHasher, Hasher as _},
     marker::PhantomData,
-    sync::Arc,
 };
 
-use crate::traits::{
-    internal::SalishMessageInternal as _, EndpointAddress, Payload, SalishMessage,
+use crate::{
+    policy::Policy,
+    traits::{internal::SalishMessageInternal as _, EndpointAddress, Payload, SalishMessage},
 };
 
-#[derive(Clone)]
+/// Message container which wraps anything implementing [`Payload`].
 pub struct Message
 where
     Self: Send + Sync,
 {
     dest: Destination<<<Self as SalishMessage>::Endpoint as EndpointAddress>::Addr>,
-    data: Arc<Box<dyn Any + Send + Sync>>,
+    payload: Box<dyn Payload>,
     type_name: &'static str,
+    is_clone: bool,
+}
+
+impl Clone for Message
+where
+    Self: Send + Sync,
+{
+    fn clone(&self) -> Self {
+        Self {
+            dest: self.dest,
+            payload: self.payload.clone_payload(),
+            type_name: self.type_name,
+            is_clone: true,
+        }
+    }
 }
 
 impl std::fmt::Debug for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Message")
+        let mut debug = &mut f.debug_struct("Message");
+        debug = debug
             .field("dest", &self.dest)
             .field("payload_type_id", &self.payload_type())
-            .field("payload_type_name", &self.type_name)
-            .finish()
+            .field("payload_type_name", &self.type_name);
+
+        if self.is_clone {
+            debug = debug.field("cloned", &self.is_clone)
+        }
+
+        debug.finish()
     }
 }
 
 impl Message {
     /// Create a new message with destination set to [`Destination::Any`].
     /// This will route the message to any registered receiver for this message type
-    pub fn new<T: Payload + 'static>(data: T) -> Self {
-        Self::new_to(Destination::Any, data)
+    pub fn new<P: Payload + 'static>(payload: P) -> Self {
+        Self::new_to(Destination::Any(Policy::default()), payload)
+    }
+
+    /// Create a new message with destination set to [`Destination::Broadcast`]
+    pub fn broadcast<P: Payload + 'static>(payload: P) -> Self {
+        Self::new_to(Destination::Broadcast(Policy::default()), payload)
     }
 
     /// Create a new message with destination specified by `dest`
-    pub fn new_to<T: Payload + 'static>(
+    pub fn new_to<P: Payload + 'static>(
         dest: Destination<<<Self as SalishMessage>::Endpoint as EndpointAddress>::Addr>,
-        data: T,
+        payload: P,
     ) -> Self {
         Self {
             dest,
-            data: Arc::new(Box::new(data)),
-            type_name: type_name::<T>(),
+            //payload: Arc::new(Box::new(payload)),
+            payload: Box::new(payload),
+            type_name: type_name::<P>(),
+            is_clone: false,
         }
     }
 
@@ -56,15 +86,32 @@ impl Message {
     /// Get the destination of this message
     pub fn dest(
         &self,
-    ) -> &Destination<<<Self as SalishMessage>::Endpoint as EndpointAddress>::Addr> {
-        &self.dest
+    ) -> Destination<<<Self as SalishMessage>::Endpoint as EndpointAddress>::Addr> {
+        self.dest
     }
 }
 
-#[derive(Clone, Debug)]
+impl SalishMessage for Message {
+    type Endpoint = u64;
+
+    fn payload(&self) -> &dyn Payload {
+        &*self.payload
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 pub enum Destination<Addr> {
-    /// Message destined to any endpoint listening to a message type
-    Any,
+    /// Message destined to any endpoint listening to a message type.
+    /// It will be delivered to a single endpoint only. Use broadcast
+    /// to send clones to all endpoints listening to a message type.
+    Any(Policy),
+
+    /// Broadcast clones of the message to all endpoints registered for
+    /// the payload [`TypeId`] of the message
+    Broadcast(Policy),
+
+    /// Publish a message to subscribers of a [`Topic`]
+    //Publish
 
     /// Message destined to a specific endpoint
     //Endpoint(Arc<dyn EndpointAddress<Addr = Addr>>),
@@ -73,7 +120,7 @@ pub enum Destination<Addr> {
 
 impl<Addr: 'static> Destination<Addr> {
     pub fn any() -> Self {
-        Self::Any
+        Self::Any(Policy::default())
     }
 
     pub fn endpoint(addr: Addr) -> Self {
@@ -107,14 +154,5 @@ impl EndpointAddress for u64 {
 
     fn addr(&self) -> Self::Addr {
         *self
-    }
-}
-
-impl SalishMessage for Message {
-    type Endpoint = u64;
-
-    /// Return the payload to internal trait methods as &dyn Any
-    fn as_any(&self) -> &dyn Any {
-        &**self.data
     }
 }

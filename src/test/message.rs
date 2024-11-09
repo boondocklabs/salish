@@ -1,16 +1,11 @@
-use crate::{
-    message::Message,
-    traits::{internal::SalishMessageInternal as _, Payload},
-};
+use crate::{message::Message, traits::internal::SalishMessageInternal as _};
 
 #[allow(unused)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum PayloadA {
     Foo(u64),
     Bar,
 }
-
-impl Payload for PayloadA {}
 
 impl<'b> From<&'b Message> for &'b PayloadA {
     fn from(value: &'b Message) -> Self {
@@ -19,13 +14,11 @@ impl<'b> From<&'b Message> for &'b PayloadA {
 }
 
 #[allow(unused)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum PayloadB {
     Baz(u64),
     Foof,
 }
-
-impl Payload for PayloadB {}
 
 impl<'b> From<&'b Message> for &'b PayloadB {
     fn from(value: &'b Message) -> Self {

@@ -1,6 +1,6 @@
 [package]
 name = "salish"
-version = "0.1.0-dev.1"
+version = "0.1.0-dev.2"
 edition = "2021"
 license = "MIT"
 description = "Messaging Library"
@@ -12,6 +12,7 @@ readme = "README.md"
 [dependencies]
 anylock = "0.1.0"
 colored = "2.1.0"
+rand = "0.8.5"
 rayon = "1.10.0"
 tracing = "0.1.40"
 tracing-test = "0.2.5"

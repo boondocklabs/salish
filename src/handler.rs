@@ -8,5 +8,5 @@ pub trait MessageHandler: std::fmt::Debug {
     /// The return type of the message handler
     type Return;
 
-    fn on_message<'b>(&'b mut self, message: &'b Self::Message) -> Self::Return;
+    fn on_message<'b>(&'b mut self, message: Self::Message) -> Self::Return;
 }
