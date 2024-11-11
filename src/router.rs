@@ -1,4 +1,9 @@
 //! Message handling and routing to [`Endpoint`] instances
+//! A message router that handles incoming messages and dispatches them to registered endpoints.
+//!
+//! The `MessageRouter` is responsible for receiving and processing incoming messages, which are then dispatched to one or more registered endpoints. Each endpoint has a specific role in handling messages, such as forwarding, filtering, or modifying the message payload.
+//!
+//! This module provides the implementation of the `MessageRouter`, which includes methods for creating new instances, registering endpoints, dispatching messages, and removing endpoints.
 
 use anylock::{AnyLock, ParkingLotMutex, ParkingLotRwLock};
 use std::{
@@ -7,7 +12,7 @@ use std::{
     ops::Deref,
     sync::{Arc, LazyLock},
 };
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, instrument, trace, trace_span, warn};
 
 use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
 
@@ -23,9 +28,6 @@ use rand::prelude::*;
 type HandlerList<'a, Ret> = Vec<EndpointHandle<'a, Ret>>;
 
 const THREADS: usize = 4;
-
-static STATIC_ENDPOINTS: LazyLock<Arc<ParkingLotMutex<Vec<Box<dyn Any + Send + Sync>>>>> =
-    LazyLock::new(|| Arc::new(ParkingLotMutex::new(Vec::new())));
 
 #[derive(Debug)]
 struct TypeHandler<'a, R> {
@@ -87,7 +89,8 @@ impl<'a, R> std::fmt::Debug for MessageRouter<'a, R> {
 
         f.debug_struct("MessageRouter")
             .field("endpoints", &self.num_endpoints())
-            .field("handlers", &self.num_handlers())
+            //.field("handlers", &self.num_handlers())
+            .field("handlers", &self.type_handlers.read().keys())
             .finish()
     }
 }
@@ -168,7 +171,7 @@ impl<'a, R> MessageRouter<'a, R> {
                         .with_min_len(
                             handlers.len() / self.pool.as_ref().unwrap().current_num_threads(),
                         )
-                        .filter_map(move |handler| (handler.callback)(message.clone())),
+                        .filter_map(|handler| (handler.callback)(message.clone())),
                 );
 
                 /*
@@ -351,23 +354,27 @@ impl<'a, R> MessageRouter<'a, R> {
         R: Send + 'static,
         F: FnMut(M) -> R + Send + Sync + 'static,
     {
-        //let handle = self.create_endpoint::<M>().message(f);
-        let endpoint = Endpoint::<'static, M, R>::new(None).message(f);
-        self.add_endpoint_handle(endpoint.handle());
+        trace_span!("router").in_scope(|| {
+            let endpoint = Endpoint::<'static, M, R>::new(None).message(f);
 
-        // Add the endpoint based on message TypeId to `type_handlers`
-        self.type_handlers
-            .write()
-            .entry(endpoint.message_type())
-            .or_default()
-            .handlers
-            .push(endpoint.handle());
+            debug!("Adding static handler for {:?}", endpoint.message_type());
 
-        if let Some(static_endpoints) = &mut self.static_endpoints {
-            static_endpoints.push(Box::new(endpoint));
-            debug!("Static endpoint added");
-        }
+            self.add_endpoint_handle(endpoint.handle());
 
-        debug!("{self:#?}");
+            // Add the endpoint based on message TypeId to `type_handlers`
+            self.type_handlers
+                .write()
+                .entry(endpoint.message_type())
+                .or_default()
+                .handlers
+                .push(endpoint.handle());
+
+            if let Some(static_endpoints) = &mut self.static_endpoints {
+                static_endpoints.push(Box::new(endpoint));
+                debug!("Static endpoint added");
+            }
+
+            debug!("{self:#?}");
+        })
     }
 }
