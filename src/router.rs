@@ -5,12 +5,12 @@
 //!
 //! This module provides the implementation of the `MessageRouter`, which includes methods for creating new instances, registering endpoints, dispatching messages, and removing endpoints.
 
-use anylock::{AnyLock, ParkingLotMutex, ParkingLotRwLock};
+use anylock::{AnyLock, ParkingLotRwLock};
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
     ops::Deref,
-    sync::{Arc, LazyLock},
+    sync::Arc,
 };
 use tracing::{debug, instrument, trace, trace_span, warn};
 
@@ -89,8 +89,8 @@ impl<'a, R> std::fmt::Debug for MessageRouter<'a, R> {
 
         f.debug_struct("MessageRouter")
             .field("endpoints", &self.num_endpoints())
-            //.field("handlers", &self.num_handlers())
-            .field("handlers", &self.type_handlers.read().keys())
+            .field("handlers", &self.num_handlers())
+            //.field("handlers", &self.type_handlers.read().keys())
             .finish()
     }
 }
@@ -320,7 +320,7 @@ impl<'a, R> MessageRouter<'a, R> {
     /// Add an [`Endpoint`] to the router. This is handled automatically in [`Endpoint::new()`]
     pub fn add_endpoint<M, Lock, Ref>(&self, endpoint: &Endpoint<'a, M, R, Lock, Ref>)
     where
-        M: Payload,
+        M: Payload + 'static,
         Ref: Deref<Target: AnyLock<EndpointInner<'a, M, R>>> + From<Lock> + Clone + Send + Sync,
         Lock: AnyLock<EndpointInner<'a, M, R>> + Send + Sync,
     {
@@ -340,8 +340,9 @@ impl<'a, R> MessageRouter<'a, R> {
 
     /// Create a new [`Endpoint`] registered with this router
     #[instrument(name = "router")]
-    pub fn create_endpoint<M: Payload>(&self) -> Endpoint<'a, M, R>
+    pub fn create_endpoint<M>(&self) -> Endpoint<'a, M, R>
     where
+        M: Payload + 'static,
         R: Send + 'a,
     {
         Endpoint::<'a, M, R>::new(Some(self.clone()))
@@ -349,8 +350,9 @@ impl<'a, R> MessageRouter<'a, R> {
 
     /// Create a static endpoint that does not need to be held by the caller.
     /// It will be held in a vec of the router, and cannot be deregistered.
-    pub fn static_endpoint<M: Payload, F>(&mut self, f: F)
+    pub fn static_endpoint<M, F>(&mut self, f: F)
     where
+        M: Payload + 'static,
         R: Send + 'static,
         F: FnMut(M) -> R + Send + Sync + 'static,
     {

@@ -47,8 +47,9 @@ where
     Self: Send + Sync,
 {
     /// Create a new [`EndpointHandle`] for an [`Endpoint`]
-    pub fn new<M: Payload, Lock, Ref>(endpoint: &Endpoint<'a, M, Ret, Lock, Ref>) -> Self
+    pub fn new<M, Lock, Ref>(endpoint: &Endpoint<'a, M, Ret, Lock, Ref>) -> Self
     where
+        M: Payload + 'static,
         Ref: Deref<Target: AnyLock<EndpointInner<'a, M, Ret>>>
             + From<Lock>
             + Clone
@@ -65,7 +66,7 @@ where
             if let Some(payload) = message.into_inner::<M>() {
                 Some(inner.write().on_message(payload))
             } else {
-                error!("Failed to downcast message");
+                error!("Endpoint closure failed to downcast message");
                 None
             }
         };

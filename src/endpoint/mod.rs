@@ -101,7 +101,7 @@ where
 /// [`Endpoint`] implementation
 impl<'a, M, R, Lock, Ref> Endpoint<'a, M, R, Lock, Ref>
 where
-    M: Payload,
+    M: Payload + 'static,
     Ref: Deref<Target: AnyLock<EndpointInner<'a, M, R>>> + From<Lock> + Clone + Send + Sync + 'a,
     Lock: AnyLock<EndpointInner<'a, M, R>> + Send + Sync + 'a,
 {
@@ -137,7 +137,10 @@ where
     }
 
     // Get the [`TypeId`] of the messages this endpoint can receive
-    pub fn message_type(&self) -> TypeId {
+    pub fn message_type(&self) -> TypeId
+    where
+        M: 'static,
+    {
         TypeId::of::<M>()
     }
 

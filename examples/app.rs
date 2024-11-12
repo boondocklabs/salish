@@ -104,13 +104,10 @@ fn main() {
 
     // Send some messages
     loop {
-        let tasks = app.router.handle_message(Message::new_to(
-            Destination::Broadcast(Policy::default()),
-            TempMessage {
-                sensor_id: 2,
-                temp: 21.22,
-            },
-        ));
+        let tasks = app.router.handle_message(Message::broadcast(TempMessage {
+            sensor_id: 2,
+            temp: 21.22,
+        }));
 
         if let Some(tasks) = tasks {
             //assert_eq!(tasks.len(), 100000);

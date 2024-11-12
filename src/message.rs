@@ -1,24 +1,23 @@
 //! Message container for wrapping any [`Payload`]
 
 use std::{
-    any::{type_name, TypeId},
+    any::TypeId,
     hash::{DefaultHasher, Hasher as _},
     marker::PhantomData,
 };
 
 use crate::{
     policy::Policy,
-    traits::{internal::SalishMessageInternal as _, EndpointAddress, Payload, SalishMessage},
+    traits::{
+        internal::SalishMessageInternal as _, BroadcastPayload, EndpointAddress, MessagePayload,
+        SalishMessage, UnicastPayload,
+    },
 };
 
 /// Message container which wraps anything implementing [`Payload`].
-pub struct Message
-where
-    Self: Send + Sync,
-{
+pub struct Message {
     dest: Destination<<<Self as SalishMessage>::Endpoint as EndpointAddress>::Addr>,
-    payload: Box<dyn Payload>,
-    type_name: &'static str,
+    payload: MessagePayload,
     is_clone: bool,
 }
 
@@ -27,11 +26,15 @@ where
     Self: Send + Sync,
 {
     fn clone(&self) -> Self {
-        Self {
-            dest: self.dest,
-            payload: self.payload.clone_payload(),
-            type_name: self.type_name,
-            is_clone: true,
+        match &self.payload {
+            MessagePayload::Unicast(_) => {
+                panic!("Cannot clone messages with Unicast payload");
+            }
+            MessagePayload::Broadcast(_) => Message {
+                dest: self.dest,
+                payload: self.payload.clone(),
+                is_clone: true,
+            },
         }
     }
 }
@@ -41,8 +44,8 @@ impl std::fmt::Debug for Message {
         let mut debug = &mut f.debug_struct("Message");
         debug = debug
             .field("dest", &self.dest)
-            .field("payload_type_id", &self.payload_type())
-            .field("payload_type_name", &self.type_name);
+            .field("payload_id", &self.payload_type())
+            .field("payload", &self.payload);
 
         if self.is_clone {
             debug = debug.field("cloned", &self.is_clone)
@@ -55,25 +58,26 @@ impl std::fmt::Debug for Message {
 impl Message {
     /// Create a new message with destination set to [`Destination::Any`].
     /// This will route the message to any registered receiver for this message type
-    pub fn new<P: Payload + 'static>(payload: P) -> Self {
-        Self::new_to(Destination::Any(Policy::default()), payload)
+    pub fn unicast<P: UnicastPayload + 'static>(payload: P) -> Self {
+        Self::new_to(Destination::Any(Policy::default()), payload.into_payload())
     }
 
     /// Create a new message with destination set to [`Destination::Broadcast`]
-    pub fn broadcast<P: Payload + 'static>(payload: P) -> Self {
-        Self::new_to(Destination::Broadcast(Policy::default()), payload)
+    pub fn broadcast<P: BroadcastPayload + 'static>(payload: P) -> Self {
+        Self::new_to(
+            Destination::Broadcast(Policy::default()),
+            payload.into_payload(),
+        )
     }
 
     /// Create a new message with destination specified by `dest`
-    pub fn new_to<P: Payload + 'static>(
+    pub fn new_to(
         dest: Destination<<<Self as SalishMessage>::Endpoint as EndpointAddress>::Addr>,
-        payload: P,
+        payload: MessagePayload,
     ) -> Self {
         Self {
             dest,
-            //payload: Arc::new(Box::new(payload)),
-            payload: Box::new(payload),
-            type_name: type_name::<P>(),
+            payload,
             is_clone: false,
         }
     }
@@ -94,8 +98,12 @@ impl Message {
 impl SalishMessage for Message {
     type Endpoint = u64;
 
-    fn payload(&self) -> &dyn Payload {
-        &*self.payload
+    fn payload<'b>(&'b self) -> &'b MessagePayload {
+        &self.payload
+    }
+
+    fn to_payload(self) -> MessagePayload {
+        self.payload
     }
 }
 

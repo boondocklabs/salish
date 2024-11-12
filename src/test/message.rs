@@ -1,7 +1,9 @@
+use std::any::Any;
+
 use crate::{message::Message, traits::internal::SalishMessageInternal as _};
 
 #[allow(unused)]
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 enum PayloadA {
     Foo(u64),
     Bar,
@@ -20,16 +22,10 @@ enum PayloadB {
     Foof,
 }
 
-impl<'b> From<&'b Message> for &'b PayloadB {
-    fn from(value: &'b Message) -> Self {
-        value.inner::<PayloadB>().unwrap()
-    }
-}
-
 #[test]
 fn simple() {
-    let msga = Message::new(PayloadA::Foo(123456));
-    let msgb = Message::new(PayloadB::Baz(5678));
+    let msga = Message::unicast(PayloadA::Foo(123456));
+    let msgb = Message::broadcast(PayloadB::Baz(5678));
 
     assert!(msga.is_type::<PayloadA>());
     assert!(msgb.is_type::<PayloadB>());
@@ -46,8 +42,16 @@ fn simple() {
 }
 
 #[test]
+fn owned() {
+    let msg = Message::unicast(PayloadA::Foo(123456));
+    let payload = msg.into_inner::<PayloadA>();
+
+    assert!(payload.is_some());
+}
+
+#[test]
 fn into_ref() {
-    let msg = Message::new(PayloadA::Foo(123456));
+    let msg = Message::unicast(PayloadA::Foo(123456));
     let a: &PayloadA = (&msg).into();
     if let PayloadA::Foo(val) = a {
         assert_eq!(*val, 123456)
