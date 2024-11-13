@@ -180,7 +180,7 @@ where
     // Register a message callback with [`EndpointInner`]
     pub fn message<F>(self, f: F) -> Self
     where
-        F: Fn(Option<S>, M) -> R + Send + Sync + 'a,
+        F: FnMut(Option<S>, M) -> R + Send + Sync + 'a,
     {
         self.inner.write().callback = Some(Box::new(f));
         self
@@ -196,7 +196,10 @@ where
     filters: Vec<Box<dyn Filter>>,
     callback: Option<
         Box<
-            dyn Fn(Option<S>, <Self as MessageHandler>::Message) -> <Self as MessageHandler>::Return
+            dyn FnMut(
+                    Option<S>,
+                    <Self as MessageHandler>::Message,
+                ) -> <Self as MessageHandler>::Return
                 + Send
                 + Sync
                 + 'a,
