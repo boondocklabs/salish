@@ -1,4 +1,4 @@
-use crate::handler::MessageHandler;
+use crate::{handler::MessageHandler, message::DynMessageSource};
 
 use super::TestPayload;
 
@@ -8,8 +8,13 @@ struct TestHandler;
 impl MessageHandler for TestHandler {
     type Message = TestPayload;
     type Return = bool;
+    type Source = u64;
 
-    fn on_message(&mut self, message: Self::Message) -> Self::Return {
+    fn on_message(
+        &mut self,
+        _source: Option<Self::Source>,
+        message: Self::Message,
+    ) -> Self::Return {
         println!("HANDLER MESSAGE {message:#?}");
         true
     }

@@ -19,9 +19,9 @@ use salish::{
 #[derive(Debug)]
 struct App<'a> {
     // Application message router, yielding a Task from each message handler
-    pub router: MessageRouter<'static, Task>,
+    pub router: MessageRouter<'static, Task, u32>,
 
-    temp_endpoints: Vec<Endpoint<'a, TempMessage, Task>>,
+    temp_endpoints: Vec<Endpoint<'a, TempMessage, Task, u32>>,
 
     count: Arc<AtomicU64>,
 }
@@ -68,7 +68,7 @@ fn main() {
         let endpoint = app
             .router
             .create_endpoint::<TempMessage>()
-            .message(move |_msg| {
+            .message(move |_src, _msg| {
                 let _tid = std::thread::current().id();
                 //println!("{:?}", _tid);
                 //_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

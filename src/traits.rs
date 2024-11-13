@@ -4,7 +4,7 @@ use std::any::Any;
 
 /// Sealed Message traits
 pub(crate) mod internal {
-    use std::any::{Any, TypeId};
+    use std::any::TypeId;
 
     pub trait SalishMessageInternal: super::SalishMessage {
         /// Downcast to the inner concrete type T.
@@ -66,10 +66,6 @@ pub(crate) mod internal {
     }
 }
 
-fn box_any<T: Any>(b: Box<T>) -> Box<dyn Any> {
-    b as Box<dyn Any>
-}
-
 /// Salish message trait, implemented by message containers for routing and unwrapping inner message types
 pub trait SalishMessage: 'static {
     /// The [`Endpoint`] type that messages can be routed to
@@ -84,21 +80,21 @@ pub trait SalishMessage: 'static {
 /// Implement sealed trait [`SalishMessageInternal`] on anything implementing [`SalishMessage`]
 impl<T> internal::SalishMessageInternal for T where T: SalishMessage {}
 
-/// Message Endpoint
-pub trait EndpointAddress: std::fmt::Debug + Send + Sync {
+/// Message Endpoint Address
+pub trait EndpointAddress: std::fmt::Debug {
     type Addr;
     fn addr(&self) -> Self::Addr;
 }
 
 /// A broadcastable message payload
-pub trait BroadcastPayload: Payload + Send + Sync {
+pub trait BroadcastPayload: Payload {
     /// Clone the payload into a `Box<dyn Any>`
     fn clone_payload(&self) -> Box<dyn BroadcastPayload>;
     fn into_payload(self) -> MessagePayload;
 }
 
 /// A unicast payload that does not implement `Clone`
-pub trait UnicastPayload: Payload + Send + Sync {
+pub trait UnicastPayload: Payload {
     fn into_payload(self) -> MessagePayload;
 }
 
@@ -111,7 +107,7 @@ pub trait Payload: std::fmt::Debug + Send + Sync {
 /// `Any + Clone + Send + Sync + Debug`
 impl<T> BroadcastPayload for T
 where
-    T: Any + Sized + Clone + Send + Sync + std::fmt::Debug,
+    T: Any + Sized + Clone + std::fmt::Debug + Send + Sync,
 {
     fn clone_payload(&self) -> Box<dyn BroadcastPayload> {
         //MessagePayload::Broadcast(Box::new((*self).clone()))
@@ -127,7 +123,7 @@ where
 /// `Any + Debug`
 impl<T> UnicastPayload for T
 where
-    T: Any + Sized + Send + Sync + std::fmt::Debug,
+    T: Any + Sized + std::fmt::Debug + Send + Sync,
 {
     fn into_payload(self) -> MessagePayload {
         MessagePayload::Unicast(Box::new(self))
@@ -138,7 +134,7 @@ where
 /// `Any + Debug`
 impl<T> Payload for T
 where
-    T: Any + Send + Sync + std::fmt::Debug,
+    T: Any + std::fmt::Debug + Send + Sync,
 {
     fn as_any(&self) -> &dyn Any {
         self
@@ -151,8 +147,8 @@ where
 
 #[derive(Debug)]
 pub enum MessagePayload {
-    Unicast(Box<dyn UnicastPayload + Send + Sync>),
-    Broadcast(Box<dyn BroadcastPayload + Send + Sync>),
+    Unicast(Box<dyn UnicastPayload>),
+    Broadcast(Box<dyn BroadcastPayload>),
 }
 
 impl MessagePayload {

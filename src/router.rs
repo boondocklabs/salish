@@ -14,30 +14,36 @@ use std::{
 };
 use tracing::{debug, instrument, trace, trace_span, warn};
 
-use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
+//use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
 
 use crate::{
     endpoint::{handle::EndpointHandle, Endpoint, EndpointId, EndpointInner},
-    message::{Destination, Message},
+    message::{Destination, Message, MessageSource},
     policy::Policy,
     traits::{internal::SalishMessageInternal as _, EndpointAddress as _, Payload},
 };
 
 use rand::prelude::*;
 
-type HandlerList<'a, Ret> = Vec<EndpointHandle<'a, Ret>>;
+type HandlerList<'a, Ret, Source> = Vec<EndpointHandle<'a, Ret, Source>>;
 
-const THREADS: usize = 4;
+//const THREADS: usize = 4;
 
 #[derive(Debug)]
-struct TypeHandler<'a, R> {
-    handlers: HandlerList<'a, R>,
+struct TypeHandler<'a, R, S>
+where
+    S: MessageSource + Copy,
+{
+    handlers: HandlerList<'a, R, S>,
 
     // Next index for round robin policy
     next_index: usize,
 }
 
-impl<'a, R> Default for TypeHandler<'a, R> {
+impl<'a, R, S> Default for TypeHandler<'a, R, S>
+where
+    S: MessageSource + Copy,
+{
     fn default() -> Self {
         Self {
             handlers: HandlerList::default(),
@@ -47,24 +53,27 @@ impl<'a, R> Default for TypeHandler<'a, R> {
 }
 
 /// Message Router
-pub struct MessageRouter<'a, R> {
+pub struct MessageRouter<'a, R, S>
+where
+    S: MessageSource + Copy,
+{
     /// Registered endpoints by EndpointId
-    endpoints: Arc<ParkingLotRwLock<HashMap<EndpointId, EndpointHandle<'a, R>>>>,
+    endpoints: Arc<ParkingLotRwLock<HashMap<EndpointId, EndpointHandle<'a, R, S>>>>,
 
     /// Map of [`TypeId`] of the Message that an Endpoint is registered to receive.
     /// This is used to dispatch messages to all registered endpoints for a specific type.
-    type_handlers: Arc<ParkingLotRwLock<HashMap<TypeId, TypeHandler<'a, R>>>>,
+    type_handlers: Arc<ParkingLotRwLock<HashMap<TypeId, TypeHandler<'a, R, S>>>>,
 
     /// Static endpoints being held. These cannot be deregistered, and live as long as the router
     static_endpoints: Option<Vec<Box<dyn Any + Send + Sync>>>,
-
-    /// Rayon thread pool
-    pool: Option<ThreadPool>,
+    // /// Rayon thread pool
+    //pool: Option<ThreadPool>,
 }
 
-impl<'a, R> Clone for MessageRouter<'a, R>
+impl<'a, R, S> Clone for MessageRouter<'a, R, S>
 where
-    R: Send,
+    //R: Send,
+    S: MessageSource + Copy,
 {
     fn clone(&self) -> Self {
         MessageRouter {
@@ -72,7 +81,7 @@ where
             type_handlers: self.type_handlers.clone(),
 
             // Clones do not get a thread pool
-            pool: None,
+            //pool: None,
 
             // Static endpoints do not get cloned
             static_endpoints: None,
@@ -80,7 +89,10 @@ where
     }
 }
 
-impl<'a, R> std::fmt::Debug for MessageRouter<'a, R> {
+impl<'a, R, S> std::fmt::Debug for MessageRouter<'a, R, S>
+where
+    S: MessageSource + Copy,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         //let handlers = self.type_handlers.read();
 
@@ -95,16 +107,20 @@ impl<'a, R> std::fmt::Debug for MessageRouter<'a, R> {
     }
 }
 
-impl<'a, R> MessageRouter<'a, R> {
+impl<'a, R, S> MessageRouter<'a, R, S>
+where
+    S: MessageSource + Copy,
+{
     pub fn new() -> Self {
         Self {
             endpoints: Arc::new(ParkingLotRwLock::new(HashMap::new())),
             type_handlers: Arc::new(ParkingLotRwLock::new(HashMap::new())),
             static_endpoints: Some(Vec::new()),
-            pool: Some(Self::new_pool()),
+            //pool: Some(Self::new_pool()),
         }
     }
 
+    /*
     /// Create a new thread pool. Only the original MessageRouter obtains a pool.
     /// Clones of the router to keep references to endpoint lists for auto deregistration do not obtain a pool.
     fn new_pool() -> ThreadPool {
@@ -116,6 +132,7 @@ impl<'a, R> MessageRouter<'a, R> {
             .build()
             .expect("Failed to create thread pool")
     }
+    */
 
     /// Get the number of endpoints registered with the router
     pub fn num_endpoints(&self) -> usize {
@@ -137,12 +154,14 @@ impl<'a, R> MessageRouter<'a, R> {
     fn call_handlers<'b>(
         &self,
         message: Message,
-        handlers: &HandlerList<'b, R>,
+        handlers: &HandlerList<'b, R, S>,
         _policy: Policy,
     ) -> Option<Vec<R>>
     where
         R: Send,
     {
+        let source = message.source::<S>();
+
         match handlers.len() {
             0 => {
                 warn!("No handlers");
@@ -151,78 +170,98 @@ impl<'a, R> MessageRouter<'a, R> {
             // If we have a single handler, get a ref to the only handler,
             // call the handler, and map the returned option into a single element vec,
             // or return None if the handler returned None
-            1 => (handlers[0].callback)(message).map(|ret| vec![ret]),
+            1 => (handlers[0].callback)(source, message).map(|ret| vec![ret]),
 
-            // Otherwise, call each handler and collect the results
-            _ => self.pool.as_ref().unwrap().install(|| {
+            _ => {
                 let mut tasks: Vec<R> = vec![];
 
-                /*
                 tasks.extend(
                     handlers
                         .iter()
-                        .filter_map(|handler| (handler.callback)(message.clone())),
+                        .filter_map(|handler| (handler.callback)(source, message.clone())),
                 );
-                */
-
-                tasks.par_extend(
-                    handlers
-                        .par_iter()
-                        .with_min_len(
-                            handlers.len() / self.pool.as_ref().unwrap().current_num_threads(),
-                        )
-                        .filter_map(|handler| (handler.callback)(message.clone())),
-                );
-
-                /*
-                tasks.par_extend(
-                    handlers
-                        .par_iter()
-                        .with_min_len(
-                            handlers.len() / self.pool.as_ref().unwrap().current_num_threads(),
-                        )
-                        .fold(
-                            || Vec::new(),
-                            |mut v: Vec<R>, handler| {
-                                if let Some(result) = (handler.callback)(message.clone()) {
-                                    v.push(result);
-                                }
-                                v
-                            },
-                        )
-                        .flatten(), //.filter_map(|handler| (handler.callback)(message.clone())),
-                );
-                */
-
-                //let tasks: Vec<_> = handlers
-                /*
-                tasks.par_extend(
-                    handlers
-                        .par_chunks(
-                            handlers.len() / self.pool.as_ref().unwrap().current_num_threads(),
-                        )
-                        .into_par_iter()
-                        .flat_map(|handler_batch| {
-                            //println!("BATCH {}", handler_batch.len());
-                            handler_batch
-                                .into_iter()
-                                .filter_map(|handler| (handler.callback)(message.clone()))
-                                .collect::<Vec<R>>()
-                        }),
-                );
-                */
 
                 if tasks.is_empty() {
                     None
                 } else {
                     Some(tasks)
                 }
-            }),
+            } /*
+              // Otherwise, call each handler and collect the results
+              _ => self.pool.as_ref().unwrap().install(|| {
+                  let mut tasks: Vec<R> = vec![];
+
+                  tasks.par_extend(
+                      handlers
+                          .par_iter()
+                          .with_min_len(
+                              handlers.len() / self.pool.as_ref().unwrap().current_num_threads(),
+                          )
+                          .filter_map(|handler| (handler.callback)(source, message.clone())),
+                  );
+
+                  /*
+                  tasks.par_extend(
+                      handlers
+                          .par_iter()
+                          .with_min_len(
+                              handlers.len() / self.pool.as_ref().unwrap().current_num_threads(),
+                          )
+                          .fold(
+                              || Vec::new(),
+                              |mut v: Vec<R>, handler| {
+                                  if let Some(result) = (handler.callback)(message.clone()) {
+                                      v.push(result);
+                                  }
+                                  v
+                              },
+                          )
+                          .flatten(), //.filter_map(|handler| (handler.callback)(message.clone())),
+                  );
+                  */
+
+                  //let tasks: Vec<_> = handlers
+                  /*
+                  tasks.par_extend(
+                      handlers
+                          .par_chunks(
+                              handlers.len() / self.pool.as_ref().unwrap().current_num_threads(),
+                          )
+                          .into_par_iter()
+                          .flat_map(|handler_batch| {
+                              //println!("BATCH {}", handler_batch.len());
+                              handler_batch
+                                  .into_iter()
+                                  .filter_map(|handler| (handler.callback)(message.clone()))
+                                  .collect::<Vec<R>>()
+                          }),
+                  );
+                  */
+
+                  if tasks.is_empty() {
+                      None
+                  } else {
+                      Some(tasks)
+                  }
+              }),
+              */
         }
     }
 
     fn dispatch_any(&self, message: Message, policy: Policy) -> Option<Vec<R>> {
         if let Some(type_handler) = self.type_handlers.write().get_mut(&message.payload_type()) {
+            let source = message.source::<S>();
+
+            if let Some(_source) = source {
+                // Message has a source, traverse the type handlers and match filters
+                for handle in type_handler.handlers.iter() {
+                    if (handle.filter)(&message) {
+                        println!("MATCHED FILTER WITH HANDLER");
+                        return (handle.callback)(source, message).map(|res| vec![res]);
+                    }
+                }
+            }
+
             match policy {
                 Policy::RoundRobin => {
                     let handle = &type_handler.handlers
@@ -230,12 +269,12 @@ impl<'a, R> MessageRouter<'a, R> {
 
                     type_handler.next_index = type_handler.next_index.wrapping_add(1);
 
-                    (handle.callback)(message).map(|res| vec![res])
+                    (handle.callback)(source, message).map(|res| vec![res])
                 }
                 Policy::Random => {
                     let index = ThreadRng::default().gen_range(0..type_handler.handlers.len());
                     let handle = &type_handler.handlers[index];
-                    (handle.callback)(message).map(|res| vec![res])
+                    (handle.callback)(source, message).map(|res| vec![res])
                 }
             }
         } else {
@@ -263,7 +302,7 @@ impl<'a, R> MessageRouter<'a, R> {
 
             self.call_handlers(message, &type_handler.handlers, policy)
         } else {
-            warn!("No Handler");
+            warn!("No Handler for broadcast");
             None
         }
     }
@@ -287,7 +326,8 @@ impl<'a, R> MessageRouter<'a, R> {
                 trace!("Sending to endpoint {}", endpoint.addr());
 
                 if let Some(handle) = self.endpoints.read().get(&endpoint.addr()) {
-                    (handle.callback)(message).map(|res| vec![res])
+                    let source = message.source::<S>();
+                    (handle.callback)(source, message).map(|res| vec![res])
                 } else {
                     None
                 }
@@ -312,17 +352,23 @@ impl<'a, R> MessageRouter<'a, R> {
     }
 
     /// Add an [`EndpointHandle`] to the router
-    fn add_endpoint_handle(&self, handle: EndpointHandle<'a, R>) {
+    fn add_endpoint_handle(&self, handle: EndpointHandle<'a, R, S>) {
         debug!("Adding {handle:?}");
         self.endpoints.write().insert(handle.endpoint_id, handle);
     }
 
     /// Add an [`Endpoint`] to the router. This is handled automatically in [`Endpoint::new()`]
-    pub fn add_endpoint<M, Lock, Ref>(&self, endpoint: &Endpoint<'a, M, R, Lock, Ref>)
+    pub fn add_endpoint<M, Lock, Ref>(&self, endpoint: &Endpoint<'a, M, R, S, Lock, Ref>)
     where
+        R: Send + 'a,
         M: Payload + 'static,
-        Ref: Deref<Target: AnyLock<EndpointInner<'a, M, R>>> + From<Lock> + Clone + Send + Sync,
-        Lock: AnyLock<EndpointInner<'a, M, R>> + Send + Sync,
+        Ref: Deref<Target: AnyLock<EndpointInner<'a, M, R, S>>>
+            + From<Lock>
+            + Clone
+            + Send
+            + Sync
+            + 'a,
+        Lock: AnyLock<EndpointInner<'a, M, R, S>> + Send + Sync,
     {
         // Add the endpoint to the `endpoints` map
         self.add_endpoint_handle(endpoint.handle());
@@ -340,12 +386,12 @@ impl<'a, R> MessageRouter<'a, R> {
 
     /// Create a new [`Endpoint`] registered with this router
     #[instrument(name = "router")]
-    pub fn create_endpoint<M>(&self) -> Endpoint<'a, M, R>
+    pub fn create_endpoint<M>(&self) -> Endpoint<'a, M, R, S>
     where
         M: Payload + 'static,
         R: Send + 'a,
     {
-        Endpoint::<'a, M, R>::new(Some(self.clone()))
+        Endpoint::<'a, M, R, S>::new(Some(self.clone()))
     }
 
     /// Create a static endpoint that does not need to be held by the caller.
@@ -354,10 +400,10 @@ impl<'a, R> MessageRouter<'a, R> {
     where
         M: Payload + 'static,
         R: Send + 'static,
-        F: FnMut(M) -> R + Send + Sync + 'static,
+        F: Fn(Option<S>, M) -> R + Send + Sync + 'static,
     {
         trace_span!("router").in_scope(|| {
-            let endpoint = Endpoint::<'static, M, R>::new(None).message(f);
+            let endpoint = Endpoint::<'static, M, R, S>::new(None).message(f);
 
             debug!("Adding static handler for {:?}", endpoint.message_type());
 

@@ -1,6 +1,9 @@
-use std::any::Any;
+use std::{any::Any, sync::Arc};
 
-use crate::{message::Message, traits::internal::SalishMessageInternal as _};
+use crate::{
+    message::{Message, MessageSource},
+    traits::internal::SalishMessageInternal as _,
+};
 
 #[allow(unused)]
 #[derive(Debug)]
@@ -39,6 +42,14 @@ fn simple() {
     if let PayloadB::Baz(val) = b {
         assert_eq!(*val, 5678)
     }
+}
+
+#[test]
+fn source() {
+    let msg = Message::unicast(1234).with_source(321u32);
+    println!("{msg:#?}");
+    let src = msg.source::<u32>().unwrap();
+    assert_eq!(src, 321);
 }
 
 #[test]

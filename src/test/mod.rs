@@ -1,4 +1,5 @@
 mod endpoint;
+mod filter;
 mod handler;
 mod message;
 mod router;
